@@ -1,19 +1,21 @@
-SRC	=	heatransfer_allegro4.cpp
 
-OBJ	=	$(SRC:.cpp=.o)
+SRC	=	.cu
+
+COMMON_SRC =	$(addprefix src/, $(SRC))
 
 NAME	=	heat_transfer
 
-CC	=	g++
+CC	=	nvcc
 
 CPPFLAGS	=	-Wall -Wextra
 
-ALLEGRO_FLAG	=	-I/usr/include/allegro4 -L/usr/lib -lalleg
-
 all:	$(NAME)
 
-$(NAME):	$(OBJ)
-		$(CC) $(OBJ) -o $(NAME) $(ALLEGRO_FLAG) -std=c++11
+$(NAME):
+		$(CC) -o $(NAME) $(COMMON_SRC)
+
+test:
+		nvprof ./$(NAME)
 
 clean:
 		$(RM) $(OBJ)
@@ -23,4 +25,4 @@ fclean:	clean
 
 re:	fclean all
 
-.PHONY:	all clean fclean re
+.PHONY:	all clean fclean re test
