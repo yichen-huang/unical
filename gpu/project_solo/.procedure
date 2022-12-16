@@ -1,0 +1,4 @@
+to see the result of the project.
+
+First, "make" then "make run" or "make run_op". It will generate a .qgis file
+Then, open Qgis app, go to "layer" -> "add raster layer" -> add the .qgis file and tessina_dem.dat file 
