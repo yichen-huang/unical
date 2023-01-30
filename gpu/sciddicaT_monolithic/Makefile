@@ -1,6 +1,6 @@
 # definisce la macro CPPC
-ifndef CPPC
-	CPPC=g++
+ifndef CUDA
+	CUDA=nvcc
 endif
 
 ifdef TEST
@@ -19,6 +19,11 @@ else
 	STEPS=4000
 endif
 
+SRC_FILE = sciddicaT_project.cpp\
+			sciddicaT_io.cpp\
+			sciddicaT_compute.cpp
+
+
 # definisce le macro contenenti i nomei degli eseguibili
 # e il numero di thread omp per la versione parallela
 NT = 2 # numero di threads OpenMP
@@ -31,8 +36,8 @@ default:all
 
 # compila le versioni seriale e OpenMP
 all:
-	$(CPPC) sciddicaT.cpp -o $(EXEC) -fopenmp -O3
-	$(CPPC) sciddicaT.cpp -o $(EXEC_SERIAL) -O3
+	$(CUDA) sciddicaT.cu -o $(EXEC) -O3
+	$(CUDA) sciddicaT.cu -o $(EXEC_SERIAL) -O3
 
 # esegue la simulazione OpenMP
 run_omp:

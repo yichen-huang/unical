@@ -1,0 +1,28 @@
+#TODO
+SciddicaT
+
+[] Straightforward parallelization
+    [] global memory only
+    [] start with monolithic
+    [] then grid-stride loops
+    [] md5 checksum
+[] Tiled parallelization with Halo cells
+    [] tiled with halo cells
+    [] shared memory required
+    [] md5 checksum
+[] Tiled parallelization without Halo cells
+    [] tiled without halo cells
+    [] shared memory required
+    [] md5 checksum
+[] MPI parallelization
+    [] multi-version using MPI
+    [] JPDM2
+    [] md5 checksum
+[] performance assessment
+    [] try different CUDA grid
+    [] put it into a table
+[] Applying the Roofline Model
+    [] plot for the GTX980, using gpumembench;
+        [] global memory
+        [] shared memory
+[] Write a report

@@ -1,1 +1,6 @@
 *.cfg
+sciddicaTomp
+sciddicaTserial
+*.qgis
+
+.vscode
