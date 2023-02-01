@@ -31,19 +31,6 @@
 // ----------------------------------------------------------------------------
 // CUDA functions
 // ----------------------------------------------------------------------------
-#define GRID_SIZE 1
-
-// inline cudaError_t checkCuda(cudaError_t result)
-// {
-// #if defined(DEBUG) || defined(_DEBUG)
-//   if (result != cudaSuccess) {
-//     fprintf(stderr, "CUDA Runtime Error: %sn", cudaGetErrorString(result));
-//     assert(result == cudaSuccess);
-//   }
-// #endif
-//   return result;
-// }
-
 #define checkCuda(ans) { gpuAssert((ans), __FILE__, __LINE__); }
 inline void gpuAssert(cudaError_t code, const char *file, int line, bool abort=true)
 {
@@ -52,6 +39,84 @@ inline void gpuAssert(cudaError_t code, const char *file, int line, bool abort=t
       fprintf(stderr,"GPUassert: %s %s %d\n", cudaGetErrorString(code), file, line);
       if (abort) exit(code);
    }
+}
+
+// ----------------------------------------------------------------------------
+// I/O functions
+// ----------------------------------------------------------------------------
+void readHeaderInfo(char* path, int &nrows, int &ncols, /*double &xllcorner, double &yllcorner, double &cellsize,*/ double &nodata)
+{
+  FILE* f;
+
+  if ( (f = fopen(path,"r") ) == 0){
+    printf("%s configuration header file not found\n", path);
+    exit(0);
+  }
+
+  //Reading the header
+  char str[STRLEN];
+  fscanf(f,"%s",&str); fscanf(f,"%s",&str); ncols = atoi(str);      //ncols
+  fscanf(f,"%s",&str); fscanf(f,"%s",&str); nrows = atoi(str);      //nrows
+  fscanf(f,"%s",&str); fscanf(f,"%s",&str); //xllcorner = atof(str);  //xllcorner
+  fscanf(f,"%s",&str); fscanf(f,"%s",&str); //yllcorner = atof(str);  //yllcorner
+  fscanf(f,"%s",&str); fscanf(f,"%s",&str); //cellsize = atof(str);   //cellsize
+  fscanf(f,"%s",&str); fscanf(f,"%s",&str); nodata = atof(str);     //NODATA_value
+}
+
+bool loadGrid2D(double *M, int rows, int columns, char *path)
+{
+  FILE *f = fopen(path, "r");
+
+  if (!f) {
+    printf("%s grid file not found\n", path);
+    exit(0);
+  }
+
+  char str[STRLEN];
+  for (int i = 0; i < rows; i++){
+    for (int j = 0; j < columns; j++)
+    {
+      fscanf(f, "%s", str);
+      SET(M, columns, i, j, atof(str));
+    }
+  }
+
+  fclose(f);
+
+  return true;
+}
+
+bool saveGrid2Dr(double *M, int rows, int columns, char *path)
+{
+  FILE *f;
+  f = fopen(path, "w");
+
+  if (!f)
+    return false;
+
+  char str[STRLEN];
+  for (int i = 0; i < rows; i++)
+  {
+    for (int j = 0; j < columns; j++)
+    {
+      sprintf(str, "%f ", GET(M, columns, i, j));
+      fprintf(f, "%s ", str);
+    }
+    fprintf(f, "\n");
+  }
+
+  fclose(f);
+
+  return true;
+}
+
+double* addLayer2D(int rows, int columns)
+{
+  double *tmp = (double *)malloc(sizeof(double) * rows * columns);
+
+  if (!tmp)
+    return NULL;
+  return tmp;
 }
 
 double* cuda_addLayer2D(int rows, int columns)
@@ -64,6 +129,9 @@ double* cuda_addLayer2D(int rows, int columns)
   return tmp;
 }
 
+// ----------------------------------------------------------------------------
+// cuda init kernel, called once before the simulation loop
+// ----------------------------------------------------------------------------
 __global__ void cuda_sciddicaTSimulationInit(int i_start, int i_end, int j_start, int j_end, int r, int c, double* Sz, double* Sh)
 {
   int i = blockIdx.y * blockDim.y + threadIdx.y + i_start;
@@ -81,6 +149,9 @@ __global__ void cuda_sciddicaTSimulationInit(int i_start, int i_end, int j_start
   }
 }
 
+// ----------------------------------------------------------------------------
+// cuda computing kernels, aka elementary processes in the XCA terminology
+// ----------------------------------------------------------------------------
 __global__ void cuda_sciddicaTResetFlows(int i_start, int i_end, int j_start, int j_end, int r, int c, double nodata, double* Sf)
 {
   int i = blockIdx.y * blockDim.y + threadIdx.y + i_start;
@@ -173,179 +244,6 @@ __global__ void cuda_sciddicaTWidthUpdate(int i_start, int i_end, int j_start, i
   Sh[0] = 69.0;
 }
 
-
-// ----------------------------------------------------------------------------
-// I/O functions
-// ----------------------------------------------------------------------------
-void readHeaderInfo(char* path, int &nrows, int &ncols, /*double &xllcorner, double &yllcorner, double &cellsize,*/ double &nodata)
-{
-  FILE* f;
-
-  if ( (f = fopen(path,"r") ) == 0){
-    printf("%s configuration header file not found\n", path);
-    exit(0);
-  }
-
-  //Reading the header
-  char str[STRLEN];
-  fscanf(f,"%s",&str); fscanf(f,"%s",&str); ncols = atoi(str);      //ncols
-  fscanf(f,"%s",&str); fscanf(f,"%s",&str); nrows = atoi(str);      //nrows
-  fscanf(f,"%s",&str); fscanf(f,"%s",&str); //xllcorner = atof(str);  //xllcorner
-  fscanf(f,"%s",&str); fscanf(f,"%s",&str); //yllcorner = atof(str);  //yllcorner
-  fscanf(f,"%s",&str); fscanf(f,"%s",&str); //cellsize = atof(str);   //cellsize
-  fscanf(f,"%s",&str); fscanf(f,"%s",&str); nodata = atof(str);     //NODATA_value
-}
-
-bool loadGrid2D(double *M, int rows, int columns, char *path)
-{
-  FILE *f = fopen(path, "r");
-
-  if (!f) {
-    printf("%s grid file not found\n", path);
-    exit(0);
-  }
-
-  char str[STRLEN];
-  for (int i = 0; i < rows; i++){
-    for (int j = 0; j < columns; j++)
-    {
-      fscanf(f, "%s", str);
-      SET(M, columns, i, j, atof(str));
-    }
-  }
-
-  fclose(f);
-
-  return true;
-}
-
-bool saveGrid2Dr(double *M, int rows, int columns, char *path)
-{
-  FILE *f;
-  f = fopen(path, "w");
-
-  if (!f)
-    return false;
-
-  char str[STRLEN];
-  for (int i = 0; i < rows; i++)
-  {
-    for (int j = 0; j < columns; j++)
-    {
-      sprintf(str, "%f ", GET(M, columns, i, j));
-      fprintf(f, "%s ", str);
-    }
-    fprintf(f, "\n");
-  }
-
-  fclose(f);
-
-  return true;
-}
-
-double* addLayer2D(int rows, int columns)
-{
-  double *tmp = (double *)malloc(sizeof(double) * rows * columns);
-
-  if (!tmp)
-    return NULL;
-  return tmp;
-}
-
-// ----------------------------------------------------------------------------
-// init kernel, called once before the simulation loop
-// ----------------------------------------------------------------------------
-void sciddicaTSimulationInit(int i, int j, int r, int c, double* Sz, double* Sh)
-{
-  double z, h;
-  h = GET(Sh, c, i, j);
-
-  if (h > 0.0)
-  {
-    z = GET(Sz, c, i, j);
-    SET(Sz, c, i, j, z - h);
-  }
-}
-
-// ----------------------------------------------------------------------------
-// computing kernels, aka elementary processes in the XCA terminology
-// ----------------------------------------------------------------------------
-void sciddicaTResetFlows(int i, int j, int r, int c, double nodata, double* Sf)
-{
-  BUF_SET(Sf, r, c, 0, i, j, 0.0);
-  BUF_SET(Sf, r, c, 1, i, j, 0.0);
-  BUF_SET(Sf, r, c, 2, i, j, 0.0);
-  BUF_SET(Sf, r, c, 3, i, j, 0.0);
-}
-
-void sciddicaTFlowsComputation(int i, int j, int r, int c, double nodata, int* Xi, int* Xj, double *Sz, double *Sh, double *Sf, double p_r, double p_epsilon)
-{
-  bool eliminated_cells[5] = {false, false, false, false, false};
-  bool again;
-  int cells_count;
-  double average;
-  double m;
-  double u[5];
-  int n;
-  double z, h;
-
-  m = GET(Sh, c, i, j) - p_epsilon;
-  u[0] = GET(Sz, c, i, j) + p_epsilon;
-  z = GET(Sz, c, i + Xi[1], j + Xj[1]);
-  h = GET(Sh, c, i + Xi[1], j + Xj[1]);
-  u[1] = z + h;
-  z = GET(Sz, c, i + Xi[2], j + Xj[2]);
-  h = GET(Sh, c, i + Xi[2], j + Xj[2]);
-  u[2] = z + h;
-  z = GET(Sz, c, i + Xi[3], j + Xj[3]);
-  h = GET(Sh, c, i + Xi[3], j + Xj[3]);
-  u[3] = z + h;
-  z = GET(Sz, c, i + Xi[4], j + Xj[4]);
-  h = GET(Sh, c, i + Xi[4], j + Xj[4]);
-  u[4] = z + h;
-
-  do
-  {
-    again = false;
-    average = m;
-    cells_count = 0;
-
-    for (n = 0; n < 5; n++)
-      if (!eliminated_cells[n])
-      {
-        average += u[n];
-        cells_count++;
-      }
-
-    if (cells_count != 0)
-      average /= cells_count;
-
-    for (n = 0; n < 5; n++)
-      if ((average <= u[n]) && (!eliminated_cells[n]))
-      {
-        eliminated_cells[n] = true;
-        again = true;
-      }
-  } while (again);
-
-  if (!eliminated_cells[1]) BUF_SET(Sf, r, c, 0, i, j, (average - u[1]) * p_r);
-  if (!eliminated_cells[2]) BUF_SET(Sf, r, c, 1, i, j, (average - u[2]) * p_r);
-  if (!eliminated_cells[3]) BUF_SET(Sf, r, c, 2, i, j, (average - u[3]) * p_r);
-  if (!eliminated_cells[4]) BUF_SET(Sf, r, c, 3, i, j, (average - u[4]) * p_r);
-}
-
-void sciddicaTWidthUpdate(int i, int j, int r, int c, double nodata, int* Xi, int* Xj, double *Sz, double *Sh, double *Sf)
-{
-  double h_next;
-  h_next = GET(Sh, c, i, j);
-  h_next += BUF_GET(Sf, r, c, 3, i+Xi[1], j+Xj[1]) - BUF_GET(Sf, r, c, 0, i, j);
-  h_next += BUF_GET(Sf, r, c, 2, i+Xi[2], j+Xj[2]) - BUF_GET(Sf, r, c, 1, i, j);
-  h_next += BUF_GET(Sf, r, c, 1, i+Xi[3], j+Xj[3]) - BUF_GET(Sf, r, c, 2, i, j);
-  h_next += BUF_GET(Sf, r, c, 0, i+Xi[4], j+Xj[4]) - BUF_GET(Sf, r, c, 3, i, j);
-
-  SET(Sh, c, i, j, h_next);
-}
-
 // ----------------------------------------------------------------------------
 // Function main()
 // ----------------------------------------------------------------------------
@@ -388,19 +286,19 @@ int main(int argc, char **argv)
   dim3 dimBlock(dim_x, dim_y, 1);
   dim3 dimGrid(512, 512, 1);
 
+  double *cuda_Sz;
+  double *cuda_Sh;
+  double *cuda_Sf;
+
+  printf("Initialising variables...\n");
   int base_Xi[] = {0, -1,  0,  0,  1};
   int base_Xj[] = {0,  0, -1,  1,  0};
 
-  printf("Malloc...\n");
   cudaMalloc(&Xi, sizeof(int) * 5);
   cudaMalloc(&Xj, sizeof(int) * 5);
 
   checkCuda(cudaMemcpy(Xi, base_Xi, sizeof(int) * 5, cudaMemcpyHostToDevice));
   checkCuda(cudaMemcpy(Xj, base_Xj, sizeof(int) * 5, cudaMemcpyHostToDevice));
-
-  double *cuda_Sz;
-  double *cuda_Sh;
-  double *cuda_Sf;
 
   printf("Initialising memory...\n");
   Sz = addLayer2D(r, c);                 // Allocates the Sz substate grid
@@ -421,10 +319,6 @@ int main(int argc, char **argv)
   checkCuda(cudaMemcpy(cuda_Sf, Sf, sizeof(double *) * rows * cols, cudaMemcpyHostToDevice));
 
   // Apply the init kernel (elementary process) to the whole domain grid (cellular space)
-  // #pragma omp parallel for
-      // for (int i = i_start; i < i_end; i++)
-        // for (int j = j_start; j < j_end; j++)
-          // sciddicaTSimulationInit(i, j, r, c, Sz, Sh);
   cuda_sciddicaTSimulationInit<<<dimGrid, dimBlock>>>(i_start, i_end, j_start, j_end, r, c, cuda_Sz, cuda_Sh);
   checkCuda(cudaGetLastError());
 
@@ -433,44 +327,31 @@ int main(int argc, char **argv)
   for (int s = 0; s < steps; ++s)
   {
     // Apply the resetFlow kernel to the whole domain
-    // #pragma omp parallel for
-        // for (int i = i_start; i < i_end; i++)
-          // for (int j = j_start; j < j_end; j++)
-            // sciddicaTResetFlows(i, j, r, c, nodata, Sf);
     cuda_sciddicaTResetFlows<<<dimGrid, dimBlock>>>(i_start, i_end, j_start, j_end, r, c, nodata, cuda_Sf);
-    cudaDeviceSynchronize();
+    checkCuda(cudaDeviceSynchronize());
+    checkCuda(cudaGetLastError());
 
     // Apply the FlowComputation kernel to the whole domain
-    // #pragma omp parallel for
-        // for (int i = i_start; i < i_end; i++)
-          // for (int j = j_start; j < j_end; j++)
-            // sciddicaTFlowsComputation(i, j, r, c, nodata, Xi, Xj, Sz, Sh, Sf, p_r, p_epsilon);
     cuda_sciddicaTFlowsComputation<<<dimGrid, dimBlock>>>(i_start, i_end, j_start, j_end, r, c, nodata, Xi, Xj, cuda_Sz, cuda_Sh, cuda_Sf, p_r, p_epsilon);
-    cudaDeviceSynchronize();
+    checkCuda(cudaDeviceSynchronize());
+    checkCuda(cudaGetLastError());
 
     // Apply the WidthUpdate mass balance kernel to the whole domain
-    // #pragma omp parallel for
-        // for (int i = i_start; i < i_end; i++)
-          // for (int j = j_start; j < j_end; j++)
-            // sciddicaTWidthUpdate(i, j, r, c, nodata, Xi, Xj, Sz, Sh, Sf);
     cuda_sciddicaTWidthUpdate<<<dimGrid, dimBlock>>>(i_start, i_end, j_start, j_end, r, c, nodata, Xi, Xj, cuda_Sz, cuda_Sh, cuda_Sf);
-    cudaDeviceSynchronize();
+    checkCuda(cudaDeviceSynchronize());
+    checkCuda(cudaGetLastError());
   }
-  //cuda_Sh[0] = 69f;
 
-  printf("copying ... ");
-
-  checkCuda(cudaMemcpy(Sz, cuda_Sz, sizeof(double *) * rows * cols, cudaMemcpyDeviceToHost));
-  checkCuda(cudaMemcpy(Sh, cuda_Sh, sizeof(double *) * rows * cols, cudaMemcpyDeviceToHost));
-  checkCuda(cudaMemcpy(Sf, cuda_Sf, sizeof(double *) * rows * cols, cudaMemcpyDeviceToHost));
-
-  printf("copied\n");
+  printf("copying memory ... \n");
+  checkCuda(cudaMemcpy(Sz, cuda_Sz, sizeof(double) * rows * cols, cudaMemcpyDeviceToHost));
+  checkCuda(cudaMemcpy(Sh, cuda_Sh, sizeof(double) * rows * cols, cudaMemcpyDeviceToHost));
+  checkCuda(cudaMemcpy(Sf, cuda_Sf, sizeof(double) * rows * cols, cudaMemcpyDeviceToHost));
+  printf("memory copied ...\n");
 
   double cl_time = static_cast<double>(cl_timer.getTimeMilliseconds()) / 1000.0;
   printf("Elapsed time: %lf [s]\n", cl_time);
 
   saveGrid2Dr(Sh, r, c, argv[OUTPUT_PATH_ID]);// Save Sh to file
-
 
   printf("Releasing memory...\n");
   delete[] Sz;
