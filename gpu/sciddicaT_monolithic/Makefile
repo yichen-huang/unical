@@ -36,8 +36,8 @@ default:all
 
 # compila le versioni seriale e OpenMP
 all:
-	$(CUDA) sciddicaT.cu -o $(EXEC) -O3
-	$(CUDA) sciddicaT.cu -o $(EXEC_SERIAL) -O3
+#	 $(CUDA) sciddicaT.cu -o $(EXEC) -O3
+	$(CUDA) sciddicaT.cu -o $(EXEC_SERIAL) -O3 -Xcudafe --diag_suppress=2464
 
 # esegue la simulazione OpenMP
 run_omp:

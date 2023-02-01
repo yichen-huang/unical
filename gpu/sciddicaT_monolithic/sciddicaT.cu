@@ -33,15 +33,25 @@
 // ----------------------------------------------------------------------------
 #define GRID_SIZE 1
 
-inline cudaError_t checkCuda(cudaError_t result)
+// inline cudaError_t checkCuda(cudaError_t result)
+// {
+// #if defined(DEBUG) || defined(_DEBUG)
+//   if (result != cudaSuccess) {
+//     fprintf(stderr, "CUDA Runtime Error: %sn", cudaGetErrorString(result));
+//     assert(result == cudaSuccess);
+//   }
+// #endif
+//   return result;
+// }
+
+#define checkCuda(ans) { gpuAssert((ans), __FILE__, __LINE__); }
+inline void gpuAssert(cudaError_t code, const char *file, int line, bool abort=true)
 {
-#if defined(DEBUG) || defined(_DEBUG)
-  if (result != cudaSuccess) {
-    fprintf(stderr, "CUDA Runtime Error: %sn", cudaGetErrorString(result));
-    assert(result == cudaSuccess);
-  }
-#endif
-  return result;
+   if (code != cudaSuccess)
+   {
+      fprintf(stderr,"GPUassert: %s %s %d\n", cudaGetErrorString(code), file, line);
+      if (abort) exit(code);
+   }
 }
 
 double* cuda_addLayer2D(int rows, int columns)
@@ -52,6 +62,115 @@ double* cuda_addLayer2D(int rows, int columns)
   if (!tmp)
     return NULL;
   return tmp;
+}
+
+__global__ void cuda_sciddicaTSimulationInit(int i_start, int i_end, int j_start, int j_end, int r, int c, double* Sz, double* Sh)
+{
+  int i = blockIdx.y * blockDim.y + threadIdx.y + i_start;
+  int j = blockIdx.x * blockDim.x + threadIdx.x + j_start;
+
+  if (i > i_end || j > j_end )return;
+
+  double z, h;
+  h = GET(Sh, c, i, j);
+
+  if (h > 0.0)
+  {
+    z = GET(Sz, c, i, j);
+    SET(Sz, c, i, j, z - h);
+  }
+}
+
+__global__ void cuda_sciddicaTResetFlows(int i_start, int i_end, int j_start, int j_end, int r, int c, double nodata, double* Sf)
+{
+  int i = blockIdx.y * blockDim.y + threadIdx.y + i_start;
+  int j = blockIdx.x * blockDim.x + threadIdx.x + j_start;
+
+  if (i > i_end || j > j_end )return;
+
+  BUF_SET(Sf, r, c, 0, i, j, 0.0);
+  BUF_SET(Sf, r, c, 1, i, j, 0.0);
+  BUF_SET(Sf, r, c, 2, i, j, 0.0);
+  BUF_SET(Sf, r, c, 3, i, j, 0.0);
+}
+
+__global__ void cuda_sciddicaTFlowsComputation(int i_start, int i_end, int j_start, int j_end, int r, int c, double nodata, int* Xi, int* Xj, double *Sz, double *Sh, double *Sf, double p_r, double p_epsilon)
+{
+  int i = blockIdx.y * blockDim.y + threadIdx.y + i_start;
+  int j = blockIdx.x * blockDim.x + threadIdx.x + j_start;
+
+  if (i > i_end || j > j_end )return;
+
+  bool eliminated_cells[5] = {false, false, false, false, false};
+  bool again;
+  int cells_count;
+  double average;
+  double m;
+  double u[5];
+  int n;
+  double z, h;
+
+  m = GET(Sh, c, i, j) - p_epsilon;
+  u[0] = GET(Sz, c, i, j) + p_epsilon;
+  z = GET(Sz, c, i + Xi[1], j + Xj[1]);
+  h = GET(Sh, c, i + Xi[1], j + Xj[1]);
+  u[1] = z + h;
+  z = GET(Sz, c, i + Xi[2], j + Xj[2]);
+  h = GET(Sh, c, i + Xi[2], j + Xj[2]);
+  u[2] = z + h;
+  z = GET(Sz, c, i + Xi[3], j + Xj[3]);
+  h = GET(Sh, c, i + Xi[3], j + Xj[3]);
+  u[3] = z + h;
+  z = GET(Sz, c, i + Xi[4], j + Xj[4]);
+  h = GET(Sh, c, i + Xi[4], j + Xj[4]);
+  u[4] = z + h;
+
+  do
+  {
+    again = false;
+    average = m;
+    cells_count = 0;
+
+    for (n = 0; n < 5; n++)
+      if (!eliminated_cells[n])
+      {
+        average += u[n];
+        cells_count++;
+      }
+
+    if (cells_count != 0)
+      average /= cells_count;
+
+    for (n = 0; n < 5; n++)
+      if ((average <= u[n]) && (!eliminated_cells[n]))
+      {
+        eliminated_cells[n] = true;
+        again = true;
+      }
+  } while (again);
+
+  if (!eliminated_cells[1]) BUF_SET(Sf, r, c, 0, i, j, (average - u[1]) * p_r);
+  if (!eliminated_cells[2]) BUF_SET(Sf, r, c, 1, i, j, (average - u[2]) * p_r);
+  if (!eliminated_cells[3]) BUF_SET(Sf, r, c, 2, i, j, (average - u[3]) * p_r);
+  if (!eliminated_cells[4]) BUF_SET(Sf, r, c, 3, i, j, (average - u[4]) * p_r);
+}
+
+__global__ void cuda_sciddicaTWidthUpdate(int i_start, int i_end, int j_start, int j_end, int r, int c, double nodata, int* Xi, int* Xj, double *Sz, double *Sh, double *Sf)
+{
+  int i = blockIdx.y * blockDim.y + threadIdx.y + i_start;
+  int j = blockIdx.x * blockDim.x + threadIdx.x + j_start;
+
+  if (i > i_end || j > j_end )return;
+
+  double h_next;
+  h_next = GET(Sh, c, i, j);
+  h_next += BUF_GET(Sf, r, c, 3, i+Xi[1], j+Xj[1]) - BUF_GET(Sf, r, c, 0, i, j);
+  h_next += BUF_GET(Sf, r, c, 2, i+Xi[2], j+Xj[2]) - BUF_GET(Sf, r, c, 1, i, j);
+  h_next += BUF_GET(Sf, r, c, 1, i+Xi[3], j+Xj[3]) - BUF_GET(Sf, r, c, 2, i, j);
+  h_next += BUF_GET(Sf, r, c, 0, i+Xi[4], j+Xj[4]) - BUF_GET(Sf, r, c, 3, i, j);
+
+  SET(Sh, c, i, j, h_next);
+  Sh[0] = 69.0;
 }
 
 
@@ -243,8 +362,8 @@ int main(int argc, char **argv)
   double *Sz;                    // Sz: substate (grid) containing the cells' altitude a.s.l.
   double *Sh;                    // Sh: substate (grid) containing the cells' flow thickness
   double *Sf;                    // Sf: 4 substates containing the flows towards the 4 neighs
-  int Xi[] = {0, -1,  0,  0,  1};// Xj: von Neuman neighborhood row coordinates (see below)
-  int Xj[] = {0,  0, -1,  1,  0};// Xj: von Neuman neighborhood col coordinates (see below)
+  int *Xi;                       // Xj: von Neuman neighborhood row coordinates (see below)
+  int *Xj;                       // Xj: von Neuman neighborhood col coordinates (see below)
   double p_r = P_R;              // p_r: minimization algorithm outflows dumping factor
   double p_epsilon = P_EPSILON;  // p_epsilon: frictional parameter threshold
   int steps = atoi(argv[STEPS_ID]); //steps: simulation steps
@@ -262,8 +381,22 @@ int main(int argc, char **argv)
   //
   //
 
-  dim3 dimBlock(cols, rows);
-  dim3 dimGrid(GRID_SIZE, GRID_SIZE);
+  int n = rows * cols;
+  int dim_x = 32;
+  int dim_y = 32;
+
+  dim3 dimBlock(dim_x, dim_y, 1);
+  dim3 dimGrid(512, 512, 1);
+
+  int base_Xi[] = {0, -1,  0,  0,  1};
+  int base_Xj[] = {0,  0, -1,  1,  0};
+
+  printf("Malloc...\n");
+  cudaMalloc(&Xi, sizeof(int) * 5);
+  cudaMalloc(&Xj, sizeof(int) * 5);
+
+  checkCuda(cudaMemcpy(Xi, base_Xi, sizeof(int) * 5, cudaMemcpyHostToDevice));
+  checkCuda(cudaMemcpy(Xj, base_Xj, sizeof(int) * 5, cudaMemcpyHostToDevice));
 
   double *cuda_Sz;
   double *cuda_Sh;
@@ -283,41 +416,58 @@ int main(int argc, char **argv)
   loadGrid2D(Sz, r, c, argv[DEM_PATH_ID]);   // Load Sz from file
   loadGrid2D(Sh, r, c, argv[SOURCE_PATH_ID]);// Load Sh from file
 
+  checkCuda(cudaMemcpy(cuda_Sz, Sz, sizeof(double *) * rows * cols, cudaMemcpyHostToDevice));
+  checkCuda(cudaMemcpy(cuda_Sh, Sh, sizeof(double *) * rows * cols, cudaMemcpyHostToDevice));
+  checkCuda(cudaMemcpy(cuda_Sf, Sf, sizeof(double *) * rows * cols, cudaMemcpyHostToDevice));
 
-
-  /*
   // Apply the init kernel (elementary process) to the whole domain grid (cellular space)
-#pragma omp parallel for
-    for (int i = i_start; i < i_end; i++)
-      for (int j = j_start; j < j_end; j++)
-        sciddicaTSimulationInit(i, j, r, c, Sz, Sh);
+  // #pragma omp parallel for
+      // for (int i = i_start; i < i_end; i++)
+        // for (int j = j_start; j < j_end; j++)
+          // sciddicaTSimulationInit(i, j, r, c, Sz, Sh);
+  cuda_sciddicaTSimulationInit<<<dimGrid, dimBlock>>>(i_start, i_end, j_start, j_end, r, c, cuda_Sz, cuda_Sh);
+  checkCuda(cudaGetLastError());
 
   util::Timer cl_timer;
   // simulation loop
   for (int s = 0; s < steps; ++s)
   {
-  // Apply the resetFlow kernel to the whole domain
-#pragma omp parallel for
-    for (int i = i_start; i < i_end; i++)
-      for (int j = j_start; j < j_end; j++)
-        sciddicaTResetFlows(i, j, r, c, nodata, Sf);
+    // Apply the resetFlow kernel to the whole domain
+    // #pragma omp parallel for
+        // for (int i = i_start; i < i_end; i++)
+          // for (int j = j_start; j < j_end; j++)
+            // sciddicaTResetFlows(i, j, r, c, nodata, Sf);
+    cuda_sciddicaTResetFlows<<<dimGrid, dimBlock>>>(i_start, i_end, j_start, j_end, r, c, nodata, cuda_Sf);
+    cudaDeviceSynchronize();
 
-  // Apply the FlowComputation kernel to the whole domain
-#pragma omp parallel for
-    for (int i = i_start; i < i_end; i++)
-      for (int j = j_start; j < j_end; j++)
-        sciddicaTFlowsComputation(i, j, r, c, nodata, Xi, Xj, Sz, Sh, Sf, p_r, p_epsilon);
+    // Apply the FlowComputation kernel to the whole domain
+    // #pragma omp parallel for
+        // for (int i = i_start; i < i_end; i++)
+          // for (int j = j_start; j < j_end; j++)
+            // sciddicaTFlowsComputation(i, j, r, c, nodata, Xi, Xj, Sz, Sh, Sf, p_r, p_epsilon);
+    cuda_sciddicaTFlowsComputation<<<dimGrid, dimBlock>>>(i_start, i_end, j_start, j_end, r, c, nodata, Xi, Xj, cuda_Sz, cuda_Sh, cuda_Sf, p_r, p_epsilon);
+    cudaDeviceSynchronize();
 
-  // Apply the WidthUpdate mass balance kernel to the whole domain
-#pragma omp parallel for
-    for (int i = i_start; i < i_end; i++)
-      for (int j = j_start; j < j_end; j++)
-        sciddicaTWidthUpdate(i, j, r, c, nodata, Xi, Xj, Sz, Sh, Sf);
+    // Apply the WidthUpdate mass balance kernel to the whole domain
+    // #pragma omp parallel for
+        // for (int i = i_start; i < i_end; i++)
+          // for (int j = j_start; j < j_end; j++)
+            // sciddicaTWidthUpdate(i, j, r, c, nodata, Xi, Xj, Sz, Sh, Sf);
+    cuda_sciddicaTWidthUpdate<<<dimGrid, dimBlock>>>(i_start, i_end, j_start, j_end, r, c, nodata, Xi, Xj, cuda_Sz, cuda_Sh, cuda_Sf);
+    cudaDeviceSynchronize();
   }
+  //cuda_Sh[0] = 69f;
+
+  printf("copying ... ");
+
+  checkCuda(cudaMemcpy(Sz, cuda_Sz, sizeof(double *) * rows * cols, cudaMemcpyDeviceToHost));
+  checkCuda(cudaMemcpy(Sh, cuda_Sh, sizeof(double *) * rows * cols, cudaMemcpyDeviceToHost));
+  checkCuda(cudaMemcpy(Sf, cuda_Sf, sizeof(double *) * rows * cols, cudaMemcpyDeviceToHost));
+
+  printf("copied\n");
+
   double cl_time = static_cast<double>(cl_timer.getTimeMilliseconds()) / 1000.0;
   printf("Elapsed time: %lf [s]\n", cl_time);
-
-  */
 
   saveGrid2Dr(Sh, r, c, argv[OUTPUT_PATH_ID]);// Save Sh to file
 
