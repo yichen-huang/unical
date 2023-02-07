@@ -4,7 +4,7 @@ SciddicaT
 [] Straightforward parallelization
     [x] global memory only
     [x] start with monolithic
-    [x] then grid-stride loops (infinite run)
+    [x] then grid-stride
     [] md5 checksum
 [] Tiled parallelization with Halo cells
     [] tiled with halo cells

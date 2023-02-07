@@ -132,12 +132,12 @@ double* cuda_addLayer2D(int rows, int columns)
 // ----------------------------------------------------------------------------
 // cuda init kernel, called once before the simulation loop
 // ----------------------------------------------------------------------------
-__global__ void cuda_sciddicaTSimulationInit(int i_start, int i_end, int j_start, int j_end, int r, int c, double* Sz, double* Sh)
+__global__ void cuda_sciddicaTSimulationInit(int r, int c, double* Sz, double* Sh)
 {
-  int i = blockIdx.y * blockDim.y + threadIdx.y + i_start;
-  int j = blockIdx.x * blockDim.x + threadIdx.x + j_start;
+  int i = blockIdx.y * blockDim.y + threadIdx.y + 1;
+  int j = blockIdx.x * blockDim.x + threadIdx.x + 1;
 
-  if (i > i_end || j > j_end )return;
+  if (i > r-1 || j > c-1 )return;
 
   double z, h;
   h = GET(Sh, c, i, j);
@@ -152,25 +152,23 @@ __global__ void cuda_sciddicaTSimulationInit(int i_start, int i_end, int j_start
 // ----------------------------------------------------------------------------
 // cuda computing kernels, aka elementary processes in the XCA terminology
 // ----------------------------------------------------------------------------
-__global__ void cuda_sciddicaTResetFlows(int i_start, int i_end, int j_start, int j_end, int r, int c, double nodata, double* Sf)
+__global__ void cuda_sciddicaTResetFlows(int r, int c, double nodata, double* Sf)
 {
-  int i = blockIdx.y * blockDim.y + threadIdx.y + i_start;
-  int j = blockIdx.x * blockDim.x + threadIdx.x + j_start;
+  int i = blockIdx.y * blockDim.y + threadIdx.y + 1;
+  int j = blockIdx.x * blockDim.x + threadIdx.x + 1;
 
-  if (i > i_end || j > j_end )return;
+  if (i > r-1 || j > c-1 )return;
 
-  BUF_SET(Sf, r, c, 0, i, j, 0.0);
-  BUF_SET(Sf, r, c, 1, i, j, 0.0);
-  BUF_SET(Sf, r, c, 2, i, j, 0.0);
-  BUF_SET(Sf, r, c, 3, i, j, 0.0);
+  for (int step = 0; step < 4; step++)
+    BUF_SET(Sf, r, c, step, i, j, 0.0);
 }
 
-__global__ void cuda_sciddicaTFlowsComputation(int i_start, int i_end, int j_start, int j_end, int r, int c, double nodata, int* Xi, int* Xj, double *Sz, double *Sh, double *Sf, double p_r, double p_epsilon)
+__global__ void cuda_sciddicaTFlowsComputation(int r, int c, double nodata, int* Xi, int* Xj, double *Sz, double *Sh, double *Sf, double p_r, double p_epsilon)
 {
-  int i = blockIdx.y * blockDim.y + threadIdx.y + i_start;
-  int j = blockIdx.x * blockDim.x + threadIdx.x + j_start;
+  int i = blockIdx.y * blockDim.y + threadIdx.y + 1;
+  int j = blockIdx.x * blockDim.x + threadIdx.x + 1;
 
-  if (i > i_end || j > j_end )return;
+  if (i > r-1 || j > c-1 )return;
 
   bool eliminated_cells[5] = {false, false, false, false, false};
   bool again;
@@ -183,18 +181,12 @@ __global__ void cuda_sciddicaTFlowsComputation(int i_start, int i_end, int j_sta
 
   m = GET(Sh, c, i, j) - p_epsilon;
   u[0] = GET(Sz, c, i, j) + p_epsilon;
-  z = GET(Sz, c, i + Xi[1], j + Xj[1]);
-  h = GET(Sh, c, i + Xi[1], j + Xj[1]);
-  u[1] = z + h;
-  z = GET(Sz, c, i + Xi[2], j + Xj[2]);
-  h = GET(Sh, c, i + Xi[2], j + Xj[2]);
-  u[2] = z + h;
-  z = GET(Sz, c, i + Xi[3], j + Xj[3]);
-  h = GET(Sh, c, i + Xi[3], j + Xj[3]);
-  u[3] = z + h;
-  z = GET(Sz, c, i + Xi[4], j + Xj[4]);
-  h = GET(Sh, c, i + Xi[4], j + Xj[4]);
-  u[4] = z + h;
+
+  for (int step = 1; step <= 4; step++) {
+    z = GET(Sz, c, i + Xi[step], j + Xj[step]);
+    h = GET(Sh, c, i + Xi[step], j + Xj[step]);
+    u[step] = z + h;
+  }
 
   do
   {
@@ -220,28 +212,25 @@ __global__ void cuda_sciddicaTFlowsComputation(int i_start, int i_end, int j_sta
       }
   } while (again);
 
-  if (!eliminated_cells[1]) BUF_SET(Sf, r, c, 0, i, j, (average - u[1]) * p_r);
-  if (!eliminated_cells[2]) BUF_SET(Sf, r, c, 1, i, j, (average - u[2]) * p_r);
-  if (!eliminated_cells[3]) BUF_SET(Sf, r, c, 2, i, j, (average - u[3]) * p_r);
-  if (!eliminated_cells[4]) BUF_SET(Sf, r, c, 3, i, j, (average - u[4]) * p_r);
+  for (int step = 1; step <= 4; step++)
+        if (!eliminated_cells[step]) BUF_SET(Sf, r, c, step-1, i, j, (average - u[step]) * p_r);
 }
 
-__global__ void cuda_sciddicaTWidthUpdate(int i_start, int i_end, int j_start, int j_end, int r, int c, double nodata, int* Xi, int* Xj, double *Sz, double *Sh, double *Sf)
+__global__ void cuda_sciddicaTWidthUpdate(int r, int c, double nodata, int* Xi, int* Xj, double *Sz, double *Sh, double *Sf)
 {
-  int i = blockIdx.y * blockDim.y + threadIdx.y + i_start;
-  int j = blockIdx.x * blockDim.x + threadIdx.x + j_start;
+  int i = blockIdx.y * blockDim.y + threadIdx.y + 1;
+  int j = blockIdx.x * blockDim.x + threadIdx.x + 1;
 
-  if (i > i_end || j > j_end )return;
+  if (i > r-1 || j > c-1 )return;
 
   double h_next;
   h_next = GET(Sh, c, i, j);
-  h_next += BUF_GET(Sf, r, c, 3, i+Xi[1], j+Xj[1]) - BUF_GET(Sf, r, c, 0, i, j);
-  h_next += BUF_GET(Sf, r, c, 2, i+Xi[2], j+Xj[2]) - BUF_GET(Sf, r, c, 1, i, j);
-  h_next += BUF_GET(Sf, r, c, 1, i+Xi[3], j+Xj[3]) - BUF_GET(Sf, r, c, 2, i, j);
-  h_next += BUF_GET(Sf, r, c, 0, i+Xi[4], j+Xj[4]) - BUF_GET(Sf, r, c, 3, i, j);
+
+  int buf_count = 4;
+  for (int step = 1; step <= 4; step++)
+    h_next += BUF_GET(Sf, r, c, buf_count-step, i+Xi[step], j+Xj[step]) - BUF_GET(Sf, r, c, step-1, i, j);
 
   SET(Sh, c, i, j, h_next);
-  Sh[0] = 69.0;
 }
 
 // ----------------------------------------------------------------------------
@@ -283,8 +272,8 @@ int main(int argc, char **argv)
   int dim_x = 32;
   int dim_y = 32;
 
+  dim3 dimGrid(ceil(sqrt(n / (dim_x * dim_y))), ceil(sqrt(n / (dim_x * dim_y))), 1);
   dim3 dimBlock(dim_x, dim_y, 1);
-  dim3 dimGrid(512, 512, 1);
 
   double *cuda_Sz;
   double *cuda_Sh;
@@ -314,12 +303,12 @@ int main(int argc, char **argv)
   loadGrid2D(Sz, r, c, argv[DEM_PATH_ID]);   // Load Sz from file
   loadGrid2D(Sh, r, c, argv[SOURCE_PATH_ID]);// Load Sh from file
 
-  checkCuda(cudaMemcpy(cuda_Sz, Sz, sizeof(double *) * rows * cols, cudaMemcpyHostToDevice));
-  checkCuda(cudaMemcpy(cuda_Sh, Sh, sizeof(double *) * rows * cols, cudaMemcpyHostToDevice));
-  checkCuda(cudaMemcpy(cuda_Sf, Sf, sizeof(double *) * rows * cols, cudaMemcpyHostToDevice));
+  checkCuda(cudaMemcpy(cuda_Sz, Sz, sizeof(double) * rows * cols, cudaMemcpyHostToDevice));
+  checkCuda(cudaMemcpy(cuda_Sh, Sh, sizeof(double) * rows * cols, cudaMemcpyHostToDevice));
+  checkCuda(cudaMemcpy(cuda_Sf, Sf, sizeof(double) * rows * cols, cudaMemcpyHostToDevice));
 
   // Apply the init kernel (elementary process) to the whole domain grid (cellular space)
-  cuda_sciddicaTSimulationInit<<<dimGrid, dimBlock>>>(i_start, i_end, j_start, j_end, r, c, cuda_Sz, cuda_Sh);
+  cuda_sciddicaTSimulationInit<<<dimGrid, dimBlock>>>(r, c, cuda_Sz, cuda_Sh);
   checkCuda(cudaGetLastError());
 
   util::Timer cl_timer;
@@ -327,17 +316,17 @@ int main(int argc, char **argv)
   for (int s = 0; s < steps; ++s)
   {
     // Apply the resetFlow kernel to the whole domain
-    cuda_sciddicaTResetFlows<<<dimGrid, dimBlock>>>(i_start, i_end, j_start, j_end, r, c, nodata, cuda_Sf);
+    cuda_sciddicaTResetFlows<<<dimGrid, dimBlock>>>(r, c, nodata, cuda_Sf);
     checkCuda(cudaDeviceSynchronize());
     checkCuda(cudaGetLastError());
 
     // Apply the FlowComputation kernel to the whole domain
-    cuda_sciddicaTFlowsComputation<<<dimGrid, dimBlock>>>(i_start, i_end, j_start, j_end, r, c, nodata, Xi, Xj, cuda_Sz, cuda_Sh, cuda_Sf, p_r, p_epsilon);
+    cuda_sciddicaTFlowsComputation<<<dimGrid, dimBlock>>>(r, c, nodata, Xi, Xj, cuda_Sz, cuda_Sh, cuda_Sf, p_r, p_epsilon);
     checkCuda(cudaDeviceSynchronize());
     checkCuda(cudaGetLastError());
 
     // Apply the WidthUpdate mass balance kernel to the whole domain
-    cuda_sciddicaTWidthUpdate<<<dimGrid, dimBlock>>>(i_start, i_end, j_start, j_end, r, c, nodata, Xi, Xj, cuda_Sz, cuda_Sh, cuda_Sf);
+    cuda_sciddicaTWidthUpdate<<<dimGrid, dimBlock>>>(r, c, nodata, Xi, Xj, cuda_Sz, cuda_Sh, cuda_Sf);
     checkCuda(cudaDeviceSynchronize());
     checkCuda(cudaGetLastError());
   }
