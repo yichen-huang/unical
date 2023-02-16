@@ -4,3 +4,5 @@ sciddicaTserial
 *.qgis
 
 .vscode
+.gitignore
+workstation

@@ -31,6 +31,10 @@
 // ----------------------------------------------------------------------------
 // CUDA functions
 // ----------------------------------------------------------------------------
+
+#define SHMEM_SIZE 32 * 32 * 1
+#define TILE_WIDTH 32
+
 #define checkCuda(ans) { gpuAssert((ans), __FILE__, __LINE__); }
 inline void gpuAssert(cudaError_t code, const char *file, int line, bool abort=true)
 {
@@ -246,8 +250,8 @@ int main(int argc, char **argv)
 
   int r = rows;                  // r: grid rows
   int c = cols;                  // c: grid columns
-  int i_start = 1, i_end = r-1;  // [i_start,i_end[: kernels application range along the rows
-  int j_start = 1, j_end = c-1;  // [i_start,i_end[: kernels application range along the rows
+  //int i_start = 1, i_end = r-1;  // [i_start,i_end[: kernels application range along the rows
+  //int j_start = 1, j_end = c-1;  // [i_start,i_end[: kernels application range along the rows
   //double *Sz;                    // Sz: substate (grid) containing the cells' altitude a.s.l.
   //double *Sh;                    // Sh: substate (grid) containing the cells' flow thickness
   //double *Sf;                    // Sf: 4 substates containing the flows towards the 4 neighs
@@ -271,11 +275,9 @@ int main(int argc, char **argv)
   //
 
   int n = rows * cols;
-  int dim_x = 32;
-  int dim_y = 32;
 
-  dim3 dimGrid(ceil(sqrt(n / (dim_x * dim_y))), ceil(sqrt(n / (dim_x * dim_y))), 1);
-  dim3 dimBlock(dim_x, dim_y, 1);
+  dim3 dimGrid(ceil(sqrt(n / (TILE_WIDTH * TILE_WIDTH))), ceil(sqrt(n / (TILE_WIDTH * TILE_WIDTH))), 1);
+  dim3 dimBlock(TILE_WIDTH, TILE_WIDTH, 1);
 
   double *cuda_Sz;
   double *cuda_Sh;
@@ -330,6 +332,7 @@ int main(int argc, char **argv)
   saveGrid2Dr(cuda_Sh, r, c, argv[OUTPUT_PATH_ID]);// Save Sh to file
 
   printf("Releasing memory...\n");
+
   cudaFree(cuda_Sz);
   cudaFree(cuda_Sh);
   cudaFree(cuda_Sf);
