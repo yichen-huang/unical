@@ -188,55 +188,55 @@ __global__ void cuda_sciddicaTFlowsComputation(int r, int c, double nodata, int*
   int n;
   double z, h;
 
+  if (row <= 0 || row >= r-1 || col <= 0 || col >= c-1) return;
+
   Sz_tile[threadIdx.y][threadIdx.x] = GET(Sz, c, row, col);
   Sh_tile[threadIdx.y][threadIdx.x] = GET(Sh, c, row, col);
   __syncthreads();
 
-  if (row > 0 && row < r-1 && col > 0 && col < c-1) {
-      m = CUDA_GET(Sh_tile, threadIdx.y, threadIdx.x) - p_epsilon;
-      u[0] = CUDA_GET(Sz_tile, threadIdx.y, threadIdx.x) + p_epsilon;
+  m = CUDA_GET(Sh_tile, threadIdx.y, threadIdx.x) - p_epsilon;
+  u[0] = CUDA_GET(Sz_tile, threadIdx.y, threadIdx.x) + p_epsilon;
 
-      for (int step = 1; step <= 4; step++) {
-        int i = row + Xi[step];
-        int j = col + Xj[step];
+  for (int step = 1; step <= 4; step++) {
+    int i = row + Xi[step];
+    int j = col + Xj[step];
 
-        if (i < r && j < c) {
-          if (i >= start_i && i < next_i && j >= start_j && j < next_j) {
-            z = CUDA_GET(Sz_tile, threadIdx.y+Xi[step], threadIdx.x+Xj[step]);
-            h = CUDA_GET(Sh_tile, threadIdx.y+Xi[step], threadIdx.x+Xj[step]);
-          }
-          else {
-            z = GET(Sz, c, i, j);
-            h = GET(Sh, c, i, j);
-          }
-          u[step] = z + h;
-        }
+    if (i < r && j < c) {
+      if (i >= start_i && i < next_i && j >= start_j && j < next_j) {
+        z = CUDA_GET(Sz_tile, threadIdx.y+Xi[step], threadIdx.x+Xj[step]);
+        h = CUDA_GET(Sh_tile, threadIdx.y+Xi[step], threadIdx.x+Xj[step]);
+      }
+      else {
+        z = GET(Sz, c, i, j);
+        h = GET(Sh, c, i, j);
+      }
+      u[step] = z + h;
+    }
+  }
+
+  do {
+    again = false;
+    average = m;
+    cells_count = 0;
+
+    for (n = 0; n < 5; n++)
+      if (!eliminated_cells[n]) {
+        average += u[n];
+        cells_count++;
       }
 
-      do {
-        again = false;
-        average = m;
-        cells_count = 0;
+    if (cells_count != 0)
+      average /= cells_count;
 
-        for (n = 0; n < 5; n++)
-          if (!eliminated_cells[n]) {
-            average += u[n];
-            cells_count++;
-          }
+    for (n = 0; n < 5; n++)
+      if ((average <= u[n]) && (!eliminated_cells[n])) {
+        eliminated_cells[n] = true;
+        again = true;
+      }
+  } while (again);
 
-        if (cells_count != 0)
-          average /= cells_count;
-
-        for (n = 0; n < 5; n++)
-          if ((average <= u[n]) && (!eliminated_cells[n])) {
-            eliminated_cells[n] = true;
-            again = true;
-          }
-      } while (again);
-
-      for (int step = 1; step <= 4; step++)
-        if (!eliminated_cells[step]) BUF_SET(Sf, r, c, step-1, row, col, (average - u[step]) * p_r);
-    }
+  for (int step = 1; step <= 4; step++)
+    if (!eliminated_cells[step]) BUF_SET(Sf, r, c, step-1, row, col, (average - u[step]) * p_r);
 }
 
  __global__ void cuda_sciddicaTWidthUpdate(int r, int c, double nodata, int* Xi, int* Xj, double *Sz, double *Sh, double *Sf)
@@ -250,31 +250,30 @@ __global__ void cuda_sciddicaTFlowsComputation(int r, int c, double nodata, int*
   int next_j = (blockIdx.x + 1) * blockDim.x;
   int next_i = (blockIdx.y + 1) * blockDim.y;
 
+  __shared__ double Sf_tile[TILE_WIDTH * ADJACENT_CELLS][TILE_WIDTH];
+
   double h_next;
   int buf_count = 4;
 
-  __shared__ double Sf_tile[TILE_WIDTH * ADJACENT_CELLS][TILE_WIDTH];
+  if (row <= 0 || row >= r-1 || col <= 0 || col >= c-1) return;
 
   for(int step = 0; step < 4; step++)
     Sf_tile[threadIdx.y + step * TILE_WIDTH][threadIdx.x] = BUF_GET(Sf, r, c, step, row, col);
   __syncthreads();
 
-  if (row > 0 && row < r-1 && col > 0 && col < c-1) {
-      h_next = GET(Sh, c, row, col);
+  h_next = GET(Sh, c, row, col);
 
-      for (int step = 1; step <= 4; step++) {
-          int i = row + Xi[step];
-          int j = col + Xj[step];
+  for (int step = 1; step <= 4; step++) {
+    int i = row + Xi[step];
+    int j = col + Xj[step];
 
-          if (i < r && j < c)
-            if (i >= start_i && i < next_i && j >= start_j && j < next_j)
-              h_next += CUDA_GET(Sf_tile, threadIdx.y+Xi[step]+(buf_count-step)*TILE_WIDTH, threadIdx.x+Xj[step]) - CUDA_GET(Sf_tile, threadIdx.y + (step-1) * TILE_WIDTH, threadIdx.x) ;
-            else
-              h_next += BUF_GET(Sf, r, c, buf_count-step, i, j) - BUF_GET(Sf, r, c, step-1, row, col);
-      }
-
-      SET(Sh, c, row, col, h_next);
-    }
+    if (i < r && j < c)
+      if (i >= start_i && i < next_i && j >= start_j && j < next_j)
+        h_next += CUDA_GET(Sf_tile, threadIdx.y+Xi[step]+(buf_count-step)*TILE_WIDTH, threadIdx.x+Xj[step]) - CUDA_GET(Sf_tile, threadIdx.y + (step-1) * TILE_WIDTH, threadIdx.x) ;
+      else
+        h_next += BUF_GET(Sf, r, c, buf_count-step, i, j) - BUF_GET(Sf, r, c, step-1, row, col);
+  }
+  SET(Sh, c, row, col, h_next);
 }
 
 // ----------------------------------------------------------------------------
