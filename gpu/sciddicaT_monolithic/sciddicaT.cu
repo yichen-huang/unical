@@ -351,5 +351,8 @@ int main(int argc, char **argv)
   cudaFree(cuda_Sh);
   cudaFree(cuda_Sf);
 
+  cudaFree(Xi);
+  cudaFree(Xj);
+
   return 0;
 }

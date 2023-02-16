@@ -110,19 +110,10 @@ bool saveGrid2Dr(double *M, int rows, int columns, char *path)
   return true;
 }
 
-double* addLayer2D(int rows, int columns)
-{
-  double *tmp = (double *)malloc(sizeof(double) * rows * columns);
-
-  if (!tmp)
-    return NULL;
-  return tmp;
-}
-
 double* cuda_addLayer2D(int rows, int columns)
 {
   double *tmp;
-  checkCuda(cudaMalloc(&tmp, sizeof(double) * rows * columns));
+  checkCuda(cudaMallocManaged(&tmp, sizeof(double) * rows * columns));
 
   if (!tmp)
     return NULL;
@@ -257,9 +248,9 @@ int main(int argc, char **argv)
   int c = cols;                  // c: grid columns
   int i_start = 1, i_end = r-1;  // [i_start,i_end[: kernels application range along the rows
   int j_start = 1, j_end = c-1;  // [i_start,i_end[: kernels application range along the rows
-  double *Sz;                    // Sz: substate (grid) containing the cells' altitude a.s.l.
-  double *Sh;                    // Sh: substate (grid) containing the cells' flow thickness
-  double *Sf;                    // Sf: 4 substates containing the flows towards the 4 neighs
+  //double *Sz;                    // Sz: substate (grid) containing the cells' altitude a.s.l.
+  //double *Sh;                    // Sh: substate (grid) containing the cells' flow thickness
+  //double *Sf;                    // Sf: 4 substates containing the flows towards the 4 neighs
   int *Xi;                       // Xj: von Neuman neighborhood row coordinates (see below)
   int *Xj;                       // Xj: von Neuman neighborhood col coordinates (see below)
   double p_r = P_R;              // p_r: minimization algorithm outflows dumping factor
@@ -291,32 +282,22 @@ int main(int argc, char **argv)
   double *cuda_Sf;
 
   printf("Initialising variables...\n");
-  int base_Xi[] = {0, -1,  0,  0,  1};
-  int base_Xj[] = {0,  0, -1,  1,  0};
 
-  cudaMalloc(&Xi, sizeof(int) * 5);
-  cudaMalloc(&Xj, sizeof(int) * 5);
+  cudaMallocManaged(&Xi, sizeof(int) * 5);
+  cudaMallocManaged(&Xj, sizeof(int) * 5);
 
-  checkCuda(cudaMemcpy(Xi, base_Xi, sizeof(int) * 5, cudaMemcpyHostToDevice));
-  checkCuda(cudaMemcpy(Xj, base_Xj, sizeof(int) * 5, cudaMemcpyHostToDevice));
+  Xi[0] = 0; Xi[1] = -1; Xi[2] = 0;  Xi[3] = 0; Xi[4] = 1;
+  Xj[0] = 0; Xj[1] = 0;  Xj[2] = -1; Xj[3] = 1; Xj[4] = 0;
 
   printf("Initialising memory...\n");
-  Sz = addLayer2D(r, c);                 // Allocates the Sz substate grid
-  Sh = addLayer2D(r, c);                 // Allocates the Sh substate grid
-  Sf = addLayer2D(ADJACENT_CELLS* r, c); // Allocates the Sf substates grid,
+  cuda_Sz = cuda_addLayer2D(r, c);                 // Allocates the Sz substate grid
+  cuda_Sh = cuda_addLayer2D(r, c);                 // Allocates the Sh substate grid
+  cuda_Sf = cuda_addLayer2D(ADJACENT_CELLS* r, c); // Allocates the Sf substates grid,
                                          //   having one layer for each adjacent cell
 
-  cuda_Sz = cuda_addLayer2D(r, c);
-  cuda_Sh = cuda_addLayer2D(r, c);
-  cuda_Sf = cuda_addLayer2D(ADJACENT_CELLS* r, c);
-
   printf("Loading memory...\n");
-  loadGrid2D(Sz, r, c, argv[DEM_PATH_ID]);   // Load Sz from file
-  loadGrid2D(Sh, r, c, argv[SOURCE_PATH_ID]);// Load Sh from file
-
-  checkCuda(cudaMemcpy(cuda_Sz, Sz, sizeof(double) * rows * cols, cudaMemcpyHostToDevice));
-  checkCuda(cudaMemcpy(cuda_Sh, Sh, sizeof(double) * rows * cols, cudaMemcpyHostToDevice));
-  checkCuda(cudaMemcpy(cuda_Sf, Sf, sizeof(double) * rows * cols, cudaMemcpyHostToDevice));
+  loadGrid2D(cuda_Sz, r, c, argv[DEM_PATH_ID]);   // Load Sz from file
+  loadGrid2D(cuda_Sh, r, c, argv[SOURCE_PATH_ID]);// Load Sh from file
 
   // Apply the init kernel (elementary process) to the whole domain grid (cellular space)
   cuda_sciddicaTSimulationInit<<<dimGrid, dimBlock>>>(r, c, cuda_Sz, cuda_Sh);
@@ -343,22 +324,12 @@ int main(int argc, char **argv)
     checkCuda(cudaGetLastError());
   }
 
-  printf("copying memory ... \n");
-  checkCuda(cudaMemcpy(Sz, cuda_Sz, sizeof(double) * rows * cols, cudaMemcpyDeviceToHost));
-  checkCuda(cudaMemcpy(Sh, cuda_Sh, sizeof(double) * rows * cols, cudaMemcpyDeviceToHost));
-  checkCuda(cudaMemcpy(Sf, cuda_Sf, sizeof(double) * rows * cols, cudaMemcpyDeviceToHost));
-  printf("memory copied ...\n");
-
   double cl_time = static_cast<double>(cl_timer.getTimeMilliseconds()) / 1000.0;
   printf("Elapsed time: %lf [s]\n", cl_time);
 
-  saveGrid2Dr(Sh, r, c, argv[OUTPUT_PATH_ID]);// Save Sh to file
+  saveGrid2Dr(cuda_Sh, r, c, argv[OUTPUT_PATH_ID]);// Save Sh to file
 
   printf("Releasing memory...\n");
-  delete[] Sz;
-  delete[] Sh;
-  delete[] Sf;
-
   cudaFree(cuda_Sz);
   cudaFree(cuda_Sh);
   cudaFree(cuda_Sf);
