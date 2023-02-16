@@ -32,8 +32,8 @@
 // CUDA functions
 // ----------------------------------------------------------------------------
 
-#define SHMEM_SIZE 32 * 32 * 1
 #define TILE_WIDTH 32
+#define CUDA_GET(M, i, j) (M[(i)][(j)])
 
 #define checkCuda(ans) { gpuAssert((ans), __FILE__, __LINE__); }
 inline void gpuAssert(cudaError_t code, const char *file, int line, bool abort=true)
@@ -169,8 +169,15 @@ __global__ void cuda_sciddicaTFlowsComputation(int r, int c, double nodata, int*
 {
   int row = threadIdx.y + blockDim.y * blockIdx.y;
   int col = threadIdx.x + blockDim.x * blockIdx.x;
-  int row_step = blockDim.y * gridDim.y;
-  int col_step = blockDim.x * gridDim.x;
+
+  int start_i = blockIdx.y * blockDim.y;
+  int start_j = blockIdx.x * blockDim.x;
+
+  int next_i = (blockIdx.y + 1) * blockDim.y;
+  int next_j = (blockIdx.x + 1) * blockDim.x;
+
+  __shared__ double Sz_tile[TILE_WIDTH][TILE_WIDTH];
+  __shared__ double Sh_tile[TILE_WIDTH][TILE_WIDTH];
 
   bool eliminated_cells[5] = {false, false, false, false, false};
   bool again;
@@ -181,14 +188,29 @@ __global__ void cuda_sciddicaTFlowsComputation(int r, int c, double nodata, int*
   int n;
   double z, h;
 
-  for (int i = row+1; i < r-1; i += row_step)
-    for (int j = col+1; j < c-1; j += col_step) {
-      m = GET(Sh, c, i, j) - p_epsilon;
-      u[0] = GET(Sz, c, i, j) + p_epsilon;
+  Sz_tile[threadIdx.y][threadIdx.x] = GET(Sz, c, row, col);
+  Sh_tile[threadIdx.y][threadIdx.x] = GET(Sh, c, row, col);
+  __syncthreads();
+
+  if (row > 0 && row < r-1 && col > 0 && col < c-1) {
+      m = CUDA_GET(Sh_tile, threadIdx.y, threadIdx.x) - p_epsilon;
+      u[0] = CUDA_GET(Sz_tile, threadIdx.y, threadIdx.x) + p_epsilon;
+
       for (int step = 1; step <= 4; step++) {
-        z = GET(Sz, c, i + Xi[step], j + Xj[step]);
-        h = GET(Sh, c, i + Xi[step], j + Xj[step]);
-        u[step] = z + h;
+        int i = row + Xi[step];
+        int j = col + Xj[step];
+
+        if (i < r && j < c) {
+          if (i >= start_i && i < next_i && j >= start_j && j < next_j) {
+            z = CUDA_GET(Sz_tile, threadIdx.y+Xi[step], threadIdx.x+Xj[step]);
+            h = CUDA_GET(Sh_tile, threadIdx.y+Xi[step], threadIdx.x+Xj[step]);
+          }
+          else {
+            z = GET(Sz, c, i, j);
+            h = GET(Sh, c, i, j);
+          }
+          u[step] = z + h;
+        }
       }
 
       do {
@@ -213,7 +235,7 @@ __global__ void cuda_sciddicaTFlowsComputation(int r, int c, double nodata, int*
       } while (again);
 
       for (int step = 1; step <= 4; step++)
-        if (!eliminated_cells[step]) BUF_SET(Sf, r, c, step-1, i, j, (average - u[step]) * p_r);
+        if (!eliminated_cells[step]) BUF_SET(Sf, r, c, step-1, row, col, (average - u[step]) * p_r);
     }
 }
 
@@ -221,21 +243,37 @@ __global__ void cuda_sciddicaTFlowsComputation(int r, int c, double nodata, int*
 {
   int row = threadIdx.y + blockDim.y * blockIdx.y;
   int col = threadIdx.x + blockDim.x * blockIdx.x;
-  int row_step = blockDim.y * gridDim.y;
-  int col_step = blockDim.x * gridDim.x;
+
+  int start_j = blockIdx.x * blockDim.x;
+  int start_i = blockIdx.y * blockDim.y;
+
+  int next_j = (blockIdx.x + 1) * blockDim.x;
+  int next_i = (blockIdx.y + 1) * blockDim.y;
 
   double h_next;
-  int buf_count;
+  int buf_count = 4;
 
-  for (int i = row+1; i < r-1; i += row_step)
-    for (int j = col+1; j < c-1; j += col_step) {
-      h_next = GET(Sh, c, i, j);
+  __shared__ double Sf_tile[TILE_WIDTH * ADJACENT_CELLS][TILE_WIDTH];
 
-      buf_count = 4;
-      for (int step = 1; step <= 4; step++)
-        h_next += BUF_GET(Sf, r, c, buf_count-step, i+Xi[step], j+Xj[step]) - BUF_GET(Sf, r, c, step-1, i, j);
+  for(int step = 0; step < 4; step++)
+    Sf_tile[threadIdx.y + step * TILE_WIDTH][threadIdx.x] = BUF_GET(Sf, r, c, step, row, col);
+  __syncthreads();
 
-      SET(Sh, c, i, j, h_next);
+  if (row > 0 && row < r-1 && col > 0 && col < c-1) {
+      h_next = GET(Sh, c, row, col);
+
+      for (int step = 1; step <= 4; step++) {
+          int i = row + Xi[step];
+          int j = col + Xj[step];
+
+          if (i < r && j < c)
+            if (i >= start_i && i < next_i && j >= start_j && j < next_j)
+              h_next += CUDA_GET(Sf_tile, threadIdx.y+Xi[step]+(buf_count-step)*TILE_WIDTH, threadIdx.x+Xj[step]) - CUDA_GET(Sf_tile, threadIdx.y + (step-1) * TILE_WIDTH, threadIdx.x) ;
+            else
+              h_next += BUF_GET(Sf, r, c, buf_count-step, i, j) - BUF_GET(Sf, r, c, step-1, row, col);
+      }
+
+      SET(Sh, c, row, col, h_next);
     }
 }
 
