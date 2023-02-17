@@ -5,4 +5,5 @@ sciddicaTserial
 
 .vscode
 .gitignore
+*.nsys-rep
 workstation

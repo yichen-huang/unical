@@ -306,7 +306,7 @@ int main(int argc, char **argv)
 
   int n = rows * cols;
 
-  dim3 dimGrid(ceil(sqrt(n / (TILE_WIDTH * TILE_WIDTH))), ceil(sqrt(n / (TILE_WIDTH * TILE_WIDTH))), 1);
+  dim3 dimGrid(ceil(n / (TILE_WIDTH * TILE_WIDTH)), ceil(n / (TILE_WIDTH * TILE_WIDTH)), 1);
   dim3 dimBlock(TILE_WIDTH, TILE_WIDTH, 1);
 
   double *cuda_Sz;

@@ -272,7 +272,7 @@ int main(int argc, char **argv)
   int dim_x = 32;
   int dim_y = 32;
 
-  dim3 dimGrid(ceil(sqrt(n / (dim_x * dim_y))), ceil(sqrt(n / (dim_x * dim_y))), 1);
+  dim3 dimGrid(ceil(n / (dim_x * dim_y)), ceil(n / (dim_x * dim_y)), 1);
   dim3 dimBlock(dim_x, dim_y, 1);
 
   double *cuda_Sz;
