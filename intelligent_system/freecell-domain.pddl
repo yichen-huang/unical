@@ -36,14 +36,13 @@
 	; C4: ?card_sender
 
 	; NOTE:
-	; 	CELLSPACE ONLY DECREASE WHEN WE ADD A CARD TO FREECELL
-	; 	COLSPACE INCREASE WHEN WE ADD CARD TO A NEW COL
-	; 	HOW? DO WE KNOW THE LIMIT OF 8 IS REACHED ? DUNNO...
+	; 	CELLSPACE AND COLSPACE DECREASE WHEN WE ADD A CARD TO 
+	; 	AND INCREASE WHEN WE REMOVE CARD
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;	STACKED FUNCTIONS
 ;
-;		THEY ONLY WORKS WITH STACKED CARDS
+;		STACKED TO NEW COL, FREECELL, HOME
 ;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 	(:action move_stacked_card_to_another_stack
@@ -129,10 +128,36 @@
 		)
 	)
 
+	(:action move_stacked_card_to_new_col
+		:parameters (
+			?moving_card ?card_sender -card
+			?max_col_available ?col_to_occupy -num
+		)
+		:precondition (and
+			; CHECK IF MOVING_CARD CAN BE MOVED
+			(CLEAR ?moving_card)
+			(ON ?moving_card ?card_sender)
+			; CHECK IF max_col_available IS AVAILABLE
+			(COLSPACE ?max_col_available)
+			; CHECK IF col_to_occupy IS max_col_available+1 (increases, don't know why)
+			(SUCCESSOR ?max_col_available ?col_to_occupy)
+		)
+		:effect (and
+			; UPDATE CARD_SENDER
+			(not (ON ?moving_card ?card_sender))
+			(CLEAR ?card_sender)
+			; UPDATE MONVING_CARD
+			(BOTTOMCOL ?moving_card)
+			; UPDATE COLS
+			(not (COLSPACE ?max_col_available))
+			(COLSPACE ?col_to_occupy)
+		)
+	)
+	
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;	INDIVIDUAL FUNCTIONS
 ;
-;		THEY ONLY IN CASE YOU HAVE ONE CARD LEFT
+;		INDIVIDUAL TO HOME, FREECELL, STACK, NEW COL
 ;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 	(:action move_individual_card_to_home
@@ -239,7 +264,7 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;	FREECELL FUNCTIONS
 ;
-;		FREECELL TO HOME OR ANOTHER STACK
+;		FREECELL TO HOME OR ANOTHER STACK, OR NEW COL
 ;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 	(:action move_card_from_freecell_to_home
@@ -303,6 +328,35 @@
 			(CLEAR ?moving_card)
 		)
 	)
-	
-)
 
+	; TIME OUT ON 10-4
+	; (:action move_card_from_freecell_to_new_col
+	; 	:parameters (
+	; 		?moving_card -card
+	; 		?max_cell_available ?current_cell -num
+	; 		?max_col_available ?col_to_occupy -num
+	; 	)
+	; 	:precondition (and
+	; 		; CHECK IF MOVING_CARD CAN BE MOVED AND IS IN FREECELL
+	; 		(INCELL ?moving_card)
+	; 		(CELLSPACE ?max_cell_available)
+	; 		(SUCCESSOR ?current_cell ?max_cell_available)
+	; 		; CHECK IF max_col_available IS AVAILABLE
+	; 		(COLSPACE ?max_col_available)
+	; 		; CHECK IF col_to_occupy IS max_col_available+1 (increases, don't know why)
+	; 		(SUCCESSOR ?max_col_available ?col_to_occupy)
+	; 	)
+	; 	:effect (and
+	; 		; UPDATE FREECELL
+	; 		(not (CELLSPACE ?max_cell_available))
+	; 		(CELLSPACE ?current_cell)
+	; 		; UPDATE COLS
+	; 		(not (COLSPACE ?max_col_available))
+	; 		(COLSPACE ?col_to_occupy)
+	; 		; UPDATE MONVING_CARD
+	; 		(not (INCELL ?moving_card))
+	; 		(BOTTOMCOL ?moving_card)
+	; 		(CLEAR ?moving_card)
+	; 	)
+	; )
+)
