@@ -1,13 +1,6 @@
-from ast import walk
 import sys
 import math
 import numpy as np
-
-# TODO
-# in information_getters class, have a variable to keep in memory the item (unchanged map)
-# in strategy class, compute blast radius
-# in strategy class, hide unreachable path
-# in agent class, detect when not tp put bombs
 
 class information_getters():
     def __init__(self, map_w: int, map_h: int, my_id: int) -> None:
@@ -20,7 +13,6 @@ class information_getters():
 
         self.entity_player = []
         self.entity_bomb = []
-        self.entity_item = []
         self.my_player = {}
 
     def __set_map(self) -> list:
@@ -37,7 +29,6 @@ class information_getters():
     def __set_info_each_entity(self) -> list:
         entity_bomb = []
         entity_player = []
-        entity_item = []
 
         for i in range(self.entity_nbr):
             entity_type, owner, x, y, param_1, param_2 = [int(j) for j in input().split()]
@@ -50,7 +41,7 @@ class information_getters():
                     'timer': param_1,
                     'bomb_reach': param_2
                     })
-            elif entity_type == 0:
+            else:
                 entity_player.append({
                     'type': entity_type,
                     'owner': owner,
@@ -59,14 +50,7 @@ class information_getters():
                     'nbr_bombs_available': param_1,
                     'bomb_reach': param_2
                     })
-            elif entity_type == 2:
-                entity_item.append({
-                    'type': entity_type,
-                    'x': x,
-                    'y': y,
-                    'item_type': param_1
-                    })
-        return entity_player, entity_bomb, entity_item
+        return entity_player, entity_bomb
 
     def __set_my_player(self) -> dict:
         for player in self.entity_player:
@@ -77,7 +61,7 @@ class information_getters():
     def update_all_info(self) -> None:
         self.map = self.__set_map()
         self.entity_nbr = self.__set_entity_number()
-        self.entity_player, self.entity_bomb, self.entity_item = self.__set_info_each_entity()
+        self.entity_player, self.entity_bomb = self.__set_info_each_entity()
         self.my_player = self.__set_my_player()
 
     def get_map(self) -> list:
@@ -141,8 +125,6 @@ class strategy():
     def __init__(self) -> None:
         self.__path = '.'
         self.__box = '0'
-        self.__item_range = '1'
-        self.__item_bomb = '2'
     
     # create a 2D array of walkable map with 0 for walkable and -1000 for not walkable
     def compute_walkable_map(self, map:list, height:int, width:int) -> list:
@@ -154,33 +136,28 @@ class strategy():
                     walkable_map[y][x] = -1000
         
         return walkable_map
-
-    # TODO avoid blast radius
-    # create a 2D array of walkable map with 0 for walkable and -1000 for not walkable
-    def compute_walkable_map_with_bomb(self, walkable_map:list, bomb_list:list) -> list:
-        for bomb in bomb_list:
-            walkable_map[bomb['y']][bomb['x']] = -1000
-        return walkable_map
-
-    # create a 2D array of box map with location_value+1 for box and items and 0 for not box
+    
+    # create a 2D array of box map with 1 for box and 0 for not box
     def compute_box_map(self, map:list, height:int, width:int) -> list:
         box_map = np.zeros((height, width), dtype=int)
 
         for y, row in enumerate(map):
             for x, col in enumerate(row):
-                if not col == self.__path:
-                    box_map[y][x] = int(col)+1
+                if col == self.__box:
+                    box_map[y][x] = 1
         
         return box_map
 
     # create a 2D array of weight map with the score of each location for a bomb
     def compute_weight_map(self, walkable_map:list, box_map:list, my_player_data:dict) -> list:
+        weight_map = np.copy(walkable_map)
+
         for y, row in enumerate(walkable_map):
             for x, col in enumerate(row):
                 if col == 0:
-                    walkable_map[y][x] = self.compute_score(x, y, box_map, my_player_data)
+                    weight_map[y][x] = self.compute_score(x, y, box_map, my_player_data)
         
-        return walkable_map
+        return weight_map
 
     # compute the score of a location for a bomb
     def compute_score(self, x:int, y:int, box_map:list, my_player_data:dict) -> int:
@@ -208,11 +185,10 @@ class strategy():
         return optimal_coord
 
     # return the optimal location for a bomb
-    def compute_optimal_bomb_location(self, map:list, height:int, width:int, my_player_data:dict, bomb_list:list) -> tuple:
+    def compute_optimal_bomb_location(self, map:list, height:int, width:int, my_player_data:dict) -> tuple:
         walkable_map = self.compute_walkable_map(map, height, width)
-        walkable_map_with_bomb = self.compute_walkable_map_with_bomb(walkable_map, bomb_list)
         box_map = self.compute_box_map(map, height, width)
-        weight_map = self.compute_weight_map(walkable_map_with_bomb, box_map, my_player_data)
+        weight_map = self.compute_weight_map(walkable_map, box_map, my_player_data)
         
         return self.get_optimal_bomb_location(weight_map)
 
@@ -220,11 +196,9 @@ class agent():
     def __init__(self) -> None:
         self.strategy = strategy()
     
-    # TODO is the optimal location reachable ?
-    # idea: just give -1000 value to unreachable location (i guess all location not connected to the player)
-    def compute_behaviour(self, map:list, height:int, width:int, my_player_data, bomb_list:list) -> None:
+    def compute_behaviour(self, map:list, height:int, width:int, my_player_data) -> None:
         player_location = (my_player_data['x'], my_player_data['y'])
-        location = self.strategy.compute_optimal_bomb_location(map, height, width, my_player_data, bomb_list)
+        location = self.strategy.compute_best_location(map, height, width, my_player_data)
 
         if my_player_data['nbr_bombs_available'] > 0 and player_location == location:
             self.place_bomb(location[0], location[1])
@@ -261,5 +235,5 @@ while True:
     #    info.get_w(),
     #    info.get_my_player_data()),
     #    file=sys.stderr, flush=True)
-    agent.compute_behaviour(info.get_map(), info.get_h(), info.get_w(), info.get_my_player_data(), info.get_entity_bomb())
+    agent.compute_behaviour(info.get_map(), info.get_h(), info.get_w(), info.get_my_player_data())
 
