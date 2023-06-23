@@ -1,20 +1,18 @@
-from ast import walk
 import sys
 import math
 import numpy as np
 
 # TODO
-# in information_getters class, have a variable to keep in memory the item (unchanged map)
+# in information_parser class, have a variable to keep in memory the item (unchanged map)
 # in strategy class, compute blast radius
 # in strategy class, hide unreachable path
 # in strategy class, find the closest optimal path
 # in agent class, detect when not tp put bombs
+# CHECK FOR THE WALLS
 
-class information_getters():
-    def __init__(self, map_w: int, map_h: int, my_id: int) -> None:
-        self.map_w = map_w
-        self.map_h = map_h
-        self.my_id = my_id
+class information_parser():
+    def __init__(self) -> None:
+        self.width, self.height, self.my_id = [int(i) for i in input().split()]
 
         self.map = []
         self.entity_nbr = 0
@@ -125,6 +123,11 @@ class information_getters():
                     ', timer and reach', bomb['timer'], bomb['bomb_reach'],
                     file=sys.stderr, flush=True)
 
+    def print_entity_item(self) -> None:
+        for item in self.entity_item:
+            print("item", item['x'], item['y'], item['item_type'],
+                    file=sys.stderr, flush=True)
+
     def print_my_player_data(self) -> None:
         print("my_player", self.my_player['owner'],
                 'at', self.my_player['x'], self.my_player['y'],
@@ -137,54 +140,75 @@ class information_getters():
         self.print_entity_player()
         self.print_entity_bomb()
         self.print_my_player_data()
+        self.print_entity_item()
 
 class strategy():
     def __init__(self) -> None:
         self.__path = '.'
+        self.__wall = 'X'
         self.__box = '0'
         self.__item_range = '1'
         self.__item_bomb = '2'
-    
-    # create a 2D array of walkable map with 0 for walkable and -1000 for not walkable
-    def compute_walkable_map(self, map:list, height:int, width:int) -> list:
-        walkable_map = np.zeros((height, width), dtype=int)
 
+        self.__unreachable = -9
+    
+    # create a 2D array of walkable map with 0 for walkable and self.__unreachable for not walkable
+    def __compute_walkable_map(self, map:list, height:int, width:int) -> list:
+        walkable_map = np.zeros((height, width), dtype=int)
+    
         for y, row in enumerate(map):
             for x, col in enumerate(row):
                 if not col == self.__path:
-                    walkable_map[y][x] = -1000
+                    walkable_map[y][x] = self.__unreachable
         
         return walkable_map
 
+    def __compute_walkable_map_with_unreachable_buffer(self, walkable_map:list, height:int, width:int, x:int, y:int) -> list:
+        if y-1 >= 0 and walkable_map[y-1][x] == 0:
+            walkable_map[y-1][x] = 1
+            self.__compute_walkable_map_with_unreachable_buffer(walkable_map, height, width, x, y-1)
+        if y+1 < height and walkable_map[y+1][x] == 0:
+            walkable_map[y+1][x] = 1
+            self.__compute_walkable_map_with_unreachable_buffer(walkable_map, height, width, x, y+1)
+        if x-1 >= 0 and walkable_map[y][x-1] == 0:
+            walkable_map[y][x-1] = 1
+            self.__compute_walkable_map_with_unreachable_buffer(walkable_map, height, width, x-1, y)
+        if x+1 < width and walkable_map[y][x+1] == 0:
+            walkable_map[y][x+1] = 1
+            self.__compute_walkable_map_with_unreachable_buffer(walkable_map, height, width, x+1, y)
+        return walkable_map
+
+    def __compute_walkable_map_with_unreachable(self, walkable_map:list, height:int, width:int, x:int, y:int) -> list:
+        walkable_map = self.__compute_walkable_map_with_unreachable_buffer(walkable_map, height, width, x, y)
+
+        for y, row in enumerate(walkable_map):
+            for x in range(len(row)):
+                if walkable_map[y][x] == 0:
+                    walkable_map[y][x] = self.__unreachable
+                elif walkable_map[y][x] == 1:
+                    walkable_map[y][x] = 0
+        return walkable_map
+
     # TODO avoid blast radius
-    # create a 2D array of walkable map with 0 for walkable and -1000 for not walkable
-    def compute_walkable_map_with_bomb(self, walkable_map:list, bomb_list:list) -> list:
+    # create a 2D array of walkable map with 0 for walkable and self.__unreachable for not walkable
+    def __compute_walkable_map_with_bomb(self, walkable_map:list, bomb_list:list) -> list:
         for bomb in bomb_list:
-            walkable_map[bomb['y']][bomb['x']] = -1000
+            walkable_map[bomb['y']][bomb['x']] = self.__unreachable
         return walkable_map
 
     # create a 2D array of box map with location_value+1 for box and items and 0 for not box
-    def compute_box_map(self, map:list, height:int, width:int) -> list:
+    def __compute_box_map(self, map:list, height:int, width:int) -> list:
         box_map = np.zeros((height, width), dtype=int)
 
         for y, row in enumerate(map):
             for x, col in enumerate(row):
-                if not col == self.__path:
-                    box_map[y][x] = int(col)+1
+                if not col == self.__path and not col == self.__wall:
+                    box_map[y][x] = 1
         
         return box_map
 
-    # create a 2D array of weight map with the score of each location for a bomb
-    def compute_weight_map(self, walkable_map:list, box_map:list, my_player_data:dict) -> list:
-        for y, row in enumerate(walkable_map):
-            for x, col in enumerate(row):
-                if col == 0:
-                    walkable_map[y][x] = self.compute_score(x, y, box_map, my_player_data)
-        
-        return walkable_map
-
     # compute the score of a location for a bomb
-    def compute_score(self, x:int, y:int, box_map:list, my_player_data:dict) -> int:
+    def __compute_score(self, x:int, y:int, box_map:list, my_player_data:dict) -> int:
         score = 0
         for i in range(1, my_player_data['bomb_reach']):
             if x + i < width:
@@ -197,9 +221,18 @@ class strategy():
                 score += box_map[y - i][x]
         return score
 
+    # create a 2D array of weight map with the score of each location for a bomb
+    def __compute_weight_map(self, walkable_map:list, box_map:list, my_player_data:dict) -> list:
+        for y, row in enumerate(walkable_map):
+            for x, col in enumerate(row):
+                if col == 0:
+                    walkable_map[y][x] = self.__compute_score(x, y, box_map, my_player_data)
+        
+        return walkable_map
+
     # return the optimal location for a bomb
-    def get_optimal_bomb_location(self, walkable_map:list) -> tuple:
-        max_score = -1000
+    def __get_optimal_bomb_location(self, walkable_map:list) -> tuple:
+        max_score = self.__unreachable
         optimal_coord = (0, 0)
         for y, row in enumerate(walkable_map):
             for x, col in enumerate(row):
@@ -210,20 +243,24 @@ class strategy():
 
     # return the optimal location for a bomb
     def compute_optimal_bomb_location(self, map:list, height:int, width:int, my_player_data:dict, bomb_list:list) -> tuple:
-        walkable_map = self.compute_walkable_map(map, height, width)
-        walkable_map_with_bomb = self.compute_walkable_map_with_bomb(walkable_map, bomb_list)
-        box_map = self.compute_box_map(map, height, width)
-        weight_map = self.compute_weight_map(walkable_map_with_bomb, box_map, my_player_data)
+        box_map = self.__compute_box_map(map, height, width)
+
+        walkable_map = self.__compute_walkable_map(map, height, width)
+        walkable_map = self.__compute_walkable_map_with_bomb(walkable_map, bomb_list)
+        walkable_map[my_player_data['y']][my_player_data['x']] = 1
+        walkable_map = self.__compute_walkable_map_with_unreachable(walkable_map, height, width, my_player_data['x'], my_player_data['y'])
+
+        weight_map = self.__compute_weight_map(walkable_map, box_map, my_player_data)
         
-        return self.get_optimal_bomb_location(weight_map)
+        return self.__get_optimal_bomb_location(weight_map)
 
 class agent():
     def __init__(self) -> None:
         self.strategy = strategy()
     
     # TODO is the optimal location reachable ?
-    # idea: just give -1000 value to unreachable location (i guess all location not connected to the player)
-    def compute_behaviour(self, map:list, height:int, width:int, my_player_data, bomb_list:list) -> None:
+    # idea: just give self.__unreachable value to unreachable location (i guess all location not connected to the player)
+    def compute_behaviour(self, map:list, height:int, width:int, my_player_data: dict, bomb_list:list) -> None:
         player_location = (my_player_data['x'], my_player_data['y'])
         location = self.strategy.compute_optimal_bomb_location(map, height, width, my_player_data, bomb_list)
 
@@ -238,29 +275,10 @@ class agent():
     def place_bomb(self, x, y):
         print("BOMB",x,y)
 
-width, height, my_id = [int(i) for i in input().split()]
-
-info = information_getters(width, height, my_id)
-#strat = strategy()
+info = information_parser()
 agent = agent()
 
 while True:
     info.update_all_info()
-
-    #info.print_map()
-    #info.print_all_entities()
-    #print("walk_map\n",strat.compute_walkable_map(info.get_map(), info.get_h(), info.get_w()), file=sys.stderr, flush=True)
-    #print("box_map\n",strat.compute_box_map(info.get_map(), info.get_h(), info.get_w()), file=sys.stderr, flush=True)
-    #print("weight_map\n",strat.compute_weight_map(
-    #    strat.compute_walkable_map(info.get_map(), info.get_h(), info.get_w()),
-    #    strat.compute_box_map(info.get_map(), info.get_h(),info.get_w()),
-    #    info.get_my_player_data()),
-    #    file=sys.stderr, flush=True)
-    #print("optimal_location\n",strat.compute_optimal_bomb_location(
-    #    info.get_map(),
-    #    info.get_h(),
-    #    info.get_w(),
-    #    info.get_my_player_data()),
-    #    file=sys.stderr, flush=True)
     agent.compute_behaviour(info.get_map(), info.get_h(), info.get_w(), info.get_my_player_data(), info.get_entity_bomb())
 
