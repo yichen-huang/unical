@@ -4,6 +4,7 @@ import numpy as np
 
 # TODO
 # item map
+# handle case where the bot get itself stuck
 
 class information_parser():
     """
